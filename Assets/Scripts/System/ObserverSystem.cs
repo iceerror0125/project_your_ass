@@ -1,24 +1,13 @@
 using System.Collections.Generic;
-using ProtectYourAss.System;
 using UnityEngine;
 
 namespace System
 {
-    /// <summary>
-    /// Simple and robust Observer Pattern system using Enum and Action<object>.
-    /// It supports passing optional parameters and is safe for unregistration during event broadcasting.
-    /// </summary>
     public static class ObserverSystem
     {
-        // Internal storage for listeners.
-        private static readonly Dictionary<ObserveMessage, Action<object>> _listeners = new Dictionary<ObserveMessage, Action<object>>();
+        private static readonly Dictionary<Type, Delegate> _listeners = new();
 
-        /// <summary>
-        /// Registers a callback for a specific event.
-        /// </summary>
-        /// <param name="eventID">The event ID enum.</param>
-        /// <param name="callback">The callback method (must accept an object parameter).</param>
-        public static void AddListener(ObserveMessage eventID, Action<object> callback)
+        public static void Subscribe<T>(Action<T> callback)
         {
             if (callback == null)
             {
@@ -26,69 +15,58 @@ namespace System
                 return;
             }
 
-            // If the key exists, add the delegate. If not, create a new entry.
-            if (_listeners.ContainsKey(eventID))
-            {
-                _listeners[eventID] += callback;
-            }
-            else
-            {
-                _listeners.Add(eventID, callback);
-            }
+            Type eventType = typeof(T);
+            _listeners.TryGetValue(eventType, out Delegate currentListeners);
+            _listeners[eventType] = Delegate.Combine(currentListeners, callback);
         }
 
-        /// <summary>
-        /// Unregisters a callback for a specific event.
-        /// </summary>
-        /// <param name="eventID">The event ID enum.</param>
-        /// <param name="callback">The callback method to remove.</param>
-        public static void RemoveListener(ObserveMessage eventID, Action<object> callback)
+        public static void UnSubscribe<T>(Action<T> callback)
         {
-            if (_listeners.ContainsKey(eventID))
+            if (callback == null)
             {
-                _listeners[eventID] -= callback;
+                return;
+            }
 
-                // Cleanup dictionary if no listeners left for this event ID.
-                if (_listeners[eventID] == null)
+            Type eventType = typeof(T);
+            if (!_listeners.TryGetValue(eventType, out Delegate currentListeners))
+            {
+                return;
+            }
+
+            Delegate remainingListeners = Delegate.Remove(currentListeners, callback);
+            if (remainingListeners == null)
+            {
+                _listeners.Remove(eventType);
+                return;
+            }
+
+            _listeners[eventType] = remainingListeners;
+        }
+
+        public static void Announce<T>(T eventData)
+        {
+            Type eventType = typeof(T);
+            if (!_listeners.TryGetValue(eventType, out Delegate listeners))
+            {
+                return;
+            }
+
+            foreach (Delegate listener in listeners.GetInvocationList())
+            {
+                try
                 {
-                    _listeners.Remove(eventID);
+                    ((Action<T>)listener).Invoke(eventData);
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogException(exception);
                 }
             }
         }
 
-        /// <summary>
-        /// Posts (triggers) an event with optional parameter data.
-        /// </summary>
-        /// <param name="eventID">The event ID enum.</param>
-        /// <param name="data">Optional data to pass to listeners. Can be null.</param>
-        public static void PostEvent(ObserveMessage eventID, object data = null)
-        {
-            if (_listeners.TryGetValue(eventID, out var callback))
-            {
-                // Invoke all registered listeners for this event.
-                // We use Try-Catch inside to ensure one listener's failure doesn't stop everyone else.
-                var invocationList = callback.GetInvocationList();
-                foreach (var del in invocationList)
-                {
-                    try
-                    {
-                        (del as Action<object>)?.Invoke(data);
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogError($"ObserverSystem: Error invoking {eventID} on {del.Method.Name}: {ex.Message}\n{ex.StackTrace}");
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// (Optional Audit Helper) Clears all listeners. Useful for testing or full scene reload.
-        /// </summary>
-        public static void ClearAllListeners()
+        public static void ClearAllSubscribeMessages()
         {
             _listeners.Clear();
-            Debug.Log("ObserverSystem: All listeners cleared.");
         }
     }
 }

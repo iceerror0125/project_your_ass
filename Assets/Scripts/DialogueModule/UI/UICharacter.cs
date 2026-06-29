@@ -1,65 +1,51 @@
-﻿using System;
-using DialogueModule.Effect;
+using DialogueModule.Model;
+using EffectModule;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace DialogueModule.UI
 {
-    public class UICharacter : MonoBehaviour
+    public sealed class UICharacter : MonoBehaviour
     {
         [SerializeField] private Image _image;
         [SerializeField] private TextMeshProUGUI _name;
         [SerializeField] private ImageFadeAndMovementEffect _effect;
 
-        public bool _hasEntered;
-        
-        public Action onEnterConversation;
-        
-        public void SetName(string name)
+        private bool _isVisible;
+
+        public void SetCharacter(Character character)
         {
-            _name.text = name;
+            _name.text = character.Name;
+            _image.sprite = character.Avatar;
         }
 
-        public void SetAvatar(Sprite sprite)
+        public void SetSpeaking(bool isSpeaking)
         {
-            _image.sprite = sprite;
-            SetImageColor(DialogueUtils.ListenerColor);
+            _image.color = isSpeaking
+                ? DialogueUtils.SpeakerColor
+                : DialogueUtils.ListenerColor;
         }
 
-        public void Speak()
+        public void Show()
         {
-            SetImageColor(DialogueUtils.SpeakerColor);
-        }
-
-        public void Listen()
-        {
-            SetImageColor(DialogueUtils.ListenerColor);
-        }
-
-        private void SetImageColor(Color color)
-        {
-            _image.color = color;
-        }
-        
-        public void EnterConversation()
-        {
-            if (_hasEntered)
-            {
-               return;
-            }
-            
-            _hasEntered = true;
-            _effect.DoEffect();
-        }
-        public void ExitConversation()
-        {
-            if (!_hasEntered)
+            if (_isVisible)
             {
                 return;
             }
-            
-            _hasEntered = false;
+
+            _isVisible = true;
+            _effect.DoEffect();
+        }
+
+        public void Hide()
+        {
+            if (!_isVisible)
+            {
+                return;
+            }
+
+            _isVisible = false;
             _effect.ReverseEffect();
         }
     }

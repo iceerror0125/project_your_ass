@@ -1,36 +1,61 @@
-﻿using System;
-using DialogueModule.Effect;
+using EffectModule;
 using TMPro;
 using UnityEngine;
 
 namespace DialogueModule.UI
 {
-    public class UITextBox : MonoBehaviour
+    public sealed class UITextBox : MonoBehaviour
     {
         [SerializeField] private TextMeshProUGUI _messageBox;
-        [SerializeField] private TypeWriterEffect _effect;
 
-        private string _cacheMessage;
-        
+        private TypeWriterEffect _effect;
+        private string _currentMessage = string.Empty;
+        private bool _isTyping;
+
         private void Awake()
         {
             _effect = new TypeWriterEffect(_messageBox);
         }
 
-        public void SetMessage(string message, Action callback = null)
+        private void OnDisable()
         {
-            message ??= "";
-            
-            _messageBox.text = message;
-            _cacheMessage = message;
-            _effect.DoEffect(message);
-            
-            _effect.onEffectCompleted = callback;
+            TrySkipTyping();
         }
 
-        public void SkipMessage()
+        public void SetMessage(string message)
         {
-            _effect.SetTextInstantly(_cacheMessage);
+            TrySkipTyping();
+            _currentMessage = message ?? string.Empty;
+
+            if (_currentMessage.Length == 0)
+            {
+                _messageBox.text = string.Empty;
+                _messageBox.maxVisibleCharacters = 0;
+                return;
+            }
+
+            _isTyping = true;
+            _effect
+                .SetText(_currentMessage)
+                .SetCallback(HandleTypingCompleted)
+                .DoEffect();
+        }
+
+        public bool TrySkipTyping()
+        {
+            if (!_isTyping)
+            {
+                return false;
+            }
+
+            _effect.SetTextInstantly(_currentMessage);
+            _isTyping = false;
+            return true;
+        }
+
+        private void HandleTypingCompleted()
+        {
+            _isTyping = false;
         }
     }
 }

@@ -1,92 +1,173 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using DialogueModule.AssetData;
-using DialogueModule.Data;
+using DialogueModule.Model;
+using DialogueModule.Repository;
 using Ink.Runtime;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace DialogueModule.Ink
 {
-    public class InkDataProcessor : MonoBehaviour, IDialogue
+    public static class InkSpeakerTagParser
     {
-        [SerializeField] private TextAsset inkJSON;
-        [SerializeField] private CharacterSpritePool characterSpritePool;
-        private InkReader _inkReader;
+        private const char Separator = ':';
+
+        public static bool TryParse(string tag, out string characterName, out Emotion emotion)
+        {
+            characterName = string.Empty;
+            emotion = Emotion.None;
+
+            if (string.IsNullOrWhiteSpace(tag))
+            {
+                return false;
+            }
+
+            int separatorIndex = tag.IndexOf(Separator);
+            if (separatorIndex <= 0 || separatorIndex >= tag.Length - 1)
+            {
+                return false;
+            }
+
+            characterName = tag.Substring(0, separatorIndex).Trim();
+            string emotionName = tag.Substring(separatorIndex + 1).Trim();
+            if (characterName.Length == 0 || !TryParseEmotion(emotionName, out emotion))
+            {
+                characterName = string.Empty;
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryParseEmotion(string value, out Emotion emotion)
+        {
+            if (string.Equals(value, "annoyed", StringComparison.OrdinalIgnoreCase))
+            {
+                emotion = Emotion.Annoy;
+                return true;
+            }
+
+            return Enum.TryParse(value, true, out emotion) && emotion != Emotion.None;
+        }
+    }
+
+    public sealed class InkDataProcessor : MonoBehaviour, IDialogue
+    {
+        private const string CharacterSideVariable = "side";
+
+        [FormerlySerializedAs("inkJSON")]
+        [SerializeField] private TextAsset _inkJson;
+
+        [FormerlySerializedAs("characterSpritePool")]
+        [SerializeField] private CharacterSpritePool _characterSpritePool;
+
+        private InkReader _reader;
 
         private void Awake()
         {
-            _inkReader = new InkReader(inkJSON.text);
+            TryCreateReader();
         }
 
-         public DialogueData GetDialogueData()
-        {   
-            DialogueData data = DialogueData.Empty;
-            bool canContinue = _inkReader.ToNextLine(out string text);
-
-            if (!canContinue) 
-                return data;
-            
-            data.speaker = GetSpeaker();
-            data.message = text;
-            data.choices = _inkReader.GetChoices();
-            data.side = GetCharacterSide();
-
-            return data;
-        }
-
-        public bool ChooseChoice(Choice choice)
+        public void Restart()
         {
-            int choiceCount = _inkReader.GetChoices().Count;
-            if (choiceCount <= choice.index) return false;
-            _inkReader.ChooseChoice(choice.index);
-            return _inkReader.CanContinue();
+            _reader = null;
+            TryCreateReader();
         }
 
-        private Character GetSpeaker()
+        public DialogueData Advance()
         {
-            List<string> tags = _inkReader.GetCurrentTags();
-
-            Character nullCharacter = new Character("Null Character", Emotion.None, null);
-            if (tags.Count == 0)
+            if (!TryCreateReader() || !HasContent())
             {
-                return nullCharacter;
-            }
-            
-            foreach (var tag in tags)
-            {
-                var split = tag.Split(':');
-                string charName =  split[0];
-                Emotion emotion = GetEmotionMapping(split[1]);
-                Sprite sprite = GetSprite(charName, emotion);
-                
-                Character character = new Character(charName, emotion, sprite);
-                return character;
+                return DialogueData.Complete;
             }
 
-            return nullCharacter;
+            string message = _reader.CanContinue ? _reader.Continue() : _reader.CurrentText;
+            return new DialogueData(
+                ResolveSpeaker(),
+                ResolveCharacterSide(),
+                message,
+                CreateChoices(_reader.CurrentChoices));
         }
 
-        private Emotion GetEmotionMapping(string emotion)
+        public bool TryChoose(DialogueChoice choice)
         {
-            string lower = emotion.ToLower();
-            switch (lower)
+            return TryCreateReader() && _reader.TryChoose(choice.Index);
+        }
+
+        private bool HasContent()
+        {
+            return _reader.CanContinue || _reader.CurrentChoices.Count > 0;
+        }
+
+        private bool TryCreateReader()
+        {
+            if (_reader != null)
             {
-                case "happy" : return Emotion.Happy;
-                case "surprise" : return Emotion.Surprise;
-                case "annoy" : return Emotion.Annoy;
-                default: return Emotion.None;
+                return true;
+            }
+
+            if (_inkJson == null)
+            {
+                Debug.LogError("InkDataProcessor requires an Ink JSON asset.", this);
+                return false;
+            }
+
+            try
+            {
+                _reader = new InkReader(_inkJson.text);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"Could not load Ink story: {exception.Message}", this);
+                return false;
             }
         }
 
-        private CharacterSide GetCharacterSide()
+        private static IReadOnlyList<DialogueChoice> CreateChoices(IReadOnlyList<Choice> inkChoices)
         {
-            string side = _inkReader.GetVariable("side");
-            return side == "left" ? CharacterSide.Left : CharacterSide.Right;
+            if (inkChoices.Count == 0)
+            {
+                return Array.Empty<DialogueChoice>();
+            }
+
+            var choices = new DialogueChoice[inkChoices.Count];
+            for (int index = 0; index < inkChoices.Count; index++)
+            {
+                Choice inkChoice = inkChoices[index];
+                choices[index] = new DialogueChoice(index, inkChoice.text);
+            }
+
+            return choices;
         }
-        
-        private Sprite GetSprite(string name, Emotion emotion)
+
+        private Character ResolveSpeaker()
         {
-            return characterSpritePool.GetSprite(name, emotion);
+            foreach (string tag in _reader.CurrentTags)
+            {
+                if (!InkSpeakerTagParser.TryParse(tag, out string name, out Emotion emotion))
+                {
+                    continue;
+                }
+
+                Sprite avatar = _characterSpritePool != null
+                    ? _characterSpritePool.GetSprite(name, emotion)
+                    : null;
+                return new Character(name, emotion, avatar);
+            }
+
+            return Character.Empty;
+        }
+
+        private CharacterSide ResolveCharacterSide()
+        {
+            if (_reader.TryGetVariable(CharacterSideVariable, out string value) &&
+                Enum.TryParse(value, true, out CharacterSide side))
+            {
+                return side;
+            }
+
+            return CharacterSide.Left;
         }
     }
 }

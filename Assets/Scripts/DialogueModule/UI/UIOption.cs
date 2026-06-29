@@ -1,69 +1,55 @@
-﻿using System;
-using Ink.Runtime;
+using System;
+using DialogueModule.Model;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace DialogueModule.UI
 {
-    public class UIOption : MonoBehaviour
+    public sealed class UIOption : MonoBehaviour
     {
         [SerializeField] private TextMeshProUGUI _message;
         [SerializeField] private Button _button;
         [SerializeField] private GameObject _backgroundObj;
-        
-        private Choice choice;
-        private bool _isEnabled = false;
-        
-        public event Action<Choice> onClicked;
-        
+
+        private DialogueChoice _choice;
+
+        public event Action<DialogueChoice> Selected;
+
         private void OnEnable()
         {
-            _button.onClick.AddListener(OnButtonClick);
+            _button.onClick.AddListener(HandleClick);
         }
 
         private void OnDisable()
         {
-            _button.onClick.RemoveListener(OnButtonClick);
+            _button.onClick.RemoveListener(HandleClick);
         }
 
-        private void OnButtonClick()
+        public void Show(DialogueChoice choice)
         {
-            onClicked?.Invoke(choice);
+            _choice = choice;
+            _message.text = choice.Text;
+            _message.gameObject.SetActive(true);
+            _backgroundObj.SetActive(true);
+            _button.interactable = true;
         }
 
-        public void SetChoice(Choice choice)
+        public void Hide()
         {
-            this.choice = choice;
-        }
-        
-        public void SetText(string text)
-        {
-            this._message.text = text;
-        }
-
-        public bool IsEnabled()
-        {
-            return _isEnabled;
-        }
-        
-        public void Enable()
-        {
-            _isEnabled = true;
-            ShowText(true);
+            _choice = default;
+            _message.text = string.Empty;
+            _message.gameObject.SetActive(false);
+            _backgroundObj.SetActive(false);
+            _button.interactable = false;
         }
 
-        public void Disable()
+        private void HandleClick()
         {
-            _isEnabled = false;
-            ShowText(false);
+            if (_button.interactable)
+            {
+                Selected?.Invoke(_choice);
+            }
         }
-
-        private void ShowText(bool enabled)
-        {
-            _message.gameObject.SetActive(enabled);
-            _backgroundObj.SetActive(enabled);
-        }
-        
     }
 }

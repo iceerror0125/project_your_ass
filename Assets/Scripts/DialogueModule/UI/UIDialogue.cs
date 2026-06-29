@@ -1,96 +1,117 @@
-﻿using System.Collections.Generic;
-using DialogueModule.AssetData;
-using DialogueModule.Data;
-using DialogueModule.Ink;
-using Ink.Runtime;
-using TriInspector;
+using System;
+using System.Collections.Generic;
+using DialogueModule.Model;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
 namespace DialogueModule.UI
 {
-    public class UIDialogue : MonoBehaviour, IPointerDownHandler
+    public sealed class UIDialogue : MonoBehaviour, IPointerDownHandler
     {
-        [Header("Ref")]
-        [SerializeField] private InkDataProcessor test;
-        
-        [Header("Character")]
+        [SerializeField] private GameObject _root;
+
+        [Header("Characters")]
         [SerializeField] private UICharacter _leftCharacter;
         [SerializeField] private UICharacter _rightCharacter;
-        
-        [Header("Components")]
+
+        [Header("Content")]
         [SerializeField] private List<UIOption> _options;
         [SerializeField] private UITextBox _textbox;
-        private UICharacterRegister _sideRegister;
-        
-        private IDialogue dialogue;
+
+        private UICharacterRegister _characterRegister;
+
+        public event Action BackgroundPressed;
+        public event Action<DialogueChoice> OptionSelected;
 
         private void Awake()
         {
-            dialogue = test;
-            _sideRegister = new UICharacterRegister(_leftCharacter, _rightCharacter);
-        }
-
-        [Button("Start dialogue")]
-        public void StartDialogue()
-        {
-            DialogueData data = dialogue.GetDialogueData();
-            if (data.IsEmpty)
-                return;
-            
-            LoadUI(data);
-        }
-        
-        private void LoadUI(DialogueData data)
-        {
-            _sideRegister.SetSpeakerAndSide(data.speaker, data.side);
-            _textbox.SetMessage(data.message);
-            
-            SetUpOption(data.choices);
-        }
-
-        private void SetUpOption(List<Choice> choices)
-        {
-            ResetOption();
-            SetOption(choices);
-        }
-        
-        private void ResetOption()
-        {
-            foreach (var option in _options)
+            _characterRegister = new UICharacterRegister(_leftCharacter, _rightCharacter);
+            foreach (UIOption option in _options)
             {
-                if (option.IsEnabled()) 
-                    option.Disable();
+                option.Selected += HandleOptionSelected;
+                option.Hide();
             }
         }
 
-        private void SetOption(List<Choice> choices)
+        private void OnDestroy()
         {
-            for (int i = 0; i < choices.Count; i++)
+            foreach (UIOption option in _options)
             {
-                UIOption option = _options[i];
-                option.Enable();
-                option.SetText(choices[i].text);
-                option.SetChoice(choices[i]);
-                option.onClicked += OnOptionClicked;
+                if (option != null)
+                {
+                    option.Selected -= HandleOptionSelected;
+                }
             }
         }
 
-        private void OnOptionClicked(Choice choice)
+        public void SetVisible(bool visible)
         {
-            bool canContinue = dialogue.ChooseChoice(choice);
-            if (!canContinue)
-            { 
-                Debug.LogWarning("Can't continue conversation");
-                return;
+            if (!visible)
+            {
+                HideOptions();
+                _characterRegister.Clear();
             }
-            
-            StartDialogue();
+
+            _root.SetActive(visible);
+        }
+
+        public void Render(DialogueData data)
+        {
+            if (data == null || data.IsComplete)
+            {
+                throw new ArgumentException("Cannot render completed dialogue data.", nameof(data));
+            }
+
+            _characterRegister.Present(data.Speaker, data.Side);
+            _textbox.SetMessage(data.Message);
+            RenderOptions(data.Choices);
+        }
+
+        public bool TrySkipTyping()
+        {
+            return _textbox.TrySkipTyping();
         }
 
         public void OnPointerDown(PointerEventData eventData)
         {
-            StartDialogue();
+            GameObject pointerTarget = eventData.pointerCurrentRaycast.gameObject;
+            if (pointerTarget != null && pointerTarget.GetComponentInParent<UIOption>() != null)
+            {
+                return;
+            }
+
+            BackgroundPressed?.Invoke();
+        }
+
+        private void RenderOptions(IReadOnlyList<DialogueChoice> choices)
+        {
+            HideOptions();
+
+            int visibleChoiceCount = Math.Min(choices.Count, _options.Count);
+            for (int index = 0; index < visibleChoiceCount; index++)
+            {
+                _options[index].Show(choices[index]);
+            }
+
+            if (choices.Count > _options.Count)
+            {
+                Debug.LogWarning(
+                    $"Dialogue has {choices.Count} choices but the UI only has {_options.Count} option slots.",
+                    this);
+            }
+        }
+
+        private void HideOptions()
+        {
+            foreach (UIOption option in _options)
+            {
+                option.Hide();
+            }
+        }
+
+        private void HandleOptionSelected(DialogueChoice choice)
+        {
+            OptionSelected?.Invoke(choice);
         }
     }
 }
